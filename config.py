@@ -16,7 +16,7 @@ YOUTUBE_KEY = config('YOUTUBE_KEY', cast=Secret, default='')
 
 
 # Database tools
-DATABASE = databases.Database(DATABASE_URL)
+DATABASE = databases.Database(DATABASE_URL.replace('postgres://', 'postgresql://'))
 
 
 # Debug run settings
