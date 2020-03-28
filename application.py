@@ -26,3 +26,11 @@ if not config.DEBUG:
 
 app = Starlette(debug=config.DEBUG, routes=ROUTES)
 app.state.config = config
+
+@app.on_event("startup")
+async def startup():
+    await database.connect()
+
+@app.on_event("shutdown")
+async def shutdown():
+    await database.disconnect()
