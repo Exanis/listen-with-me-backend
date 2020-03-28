@@ -72,9 +72,9 @@ class RoomSong():
             query = select([Room]).where(Room.id == self.room_id)
             room = await DATABASE.fetch_one(query)
             songs_query = select([Song]).where(Song.room_id == self.room_id)
-            if room.room_type == RoomType.simple:
+            if room['room_type'] == RoomType.simple:
                 songs_query = songs_query.order_by(Song.order)
-            elif room.room_type == RoomType.random:
+            elif room['room_type'] == RoomType.random:
                 songs_query = songs_query.order_by(func.random())
             else:
                 songs_query = songs_query.order_by(Song.upvotes.desc(), Song.order)
@@ -83,29 +83,29 @@ class RoomSong():
                 to_play = songs[0] if self.paused == -1 else self.playing
                 data = YOUTUBE.videos().list(
                     part='contentDetails',
-                    id=to_play.url
+                    id=to_play['url']
                 )
                 content = data.execute()
                 if content.get('items', []):
                     duration_iso = content['items'][0].get('contentDetails', {}).get('duration')
                     duration = parse_duration(duration_iso).total_seconds()
                     if self.paused == -1:
-                        query = update(Song).where(Song.room_id == to_play.room_id).values(order=Song.order - 1)
+                        query = update(Song).where(Song.room_id == to_play['room_id']).values(order=Song.order - 1)
                         await DATABASE.execute(query)
-                        query = update(Song).where(Song.id == to_play.id).values(
+                        query = update(Song).where(Song.id == to_play['id']).values(
                             upvotes=0,
                             order=len(songs)
                         )
                         await DATABASE.execute(query)
                         for user in USER_VOTES['voted']:
-                            if to_play.id in USER_VOTES['voted']:
-                                USER_VOTES['voted'][user].remove(to_play.id)
+                            if to_play['id'] in USER_VOTES['voted']:
+                                USER_VOTES['voted'][user].remove(to_play['id'])
                         await internal_channel_propagate(self.group, {'action': 'refresh_songs'})
                     self.playing = to_play
                     self.time = int(time())
                     await internal_channel_propagate(self.group, {
                         'action': 'play_song',
-                        'id': to_play.url,
+                        'id': to_play['url'],
                         'start': 0 if self.paused == -1 else self.paused
                     })
                     if self.paused != -1:
@@ -114,7 +114,7 @@ class RoomSong():
                     self.paused = -1
                     await asyncio.sleep(int(duration))
                 else:
-                    query = delete(Song).where(Song.id == to_play.id)
+                    query = delete(Song).where(Song.id == to_play['id'])
                     await DATABASE.execute(query)
             else:
                 self.play = False
@@ -144,7 +144,7 @@ class Server(WebSocketEndpoint):
     async def on_disconnect(self, websocket: WebSocket, close_code: int):
         await super().on_disconnect(websocket, close_code)
         if self.room:
-            ROOMS[self.room.id].leave(self.user['name'])
+            ROOMS[self.room['id']].leave(self.user['name'])
             self.channel_layer.group_send(self.room_key, {
                 'action': 'leave',
                 'user': self.user['name']
@@ -206,17 +206,18 @@ class Server(WebSocketEndpoint):
         })
 
     async def join_room(self, command: dict) -> None:
+        from asyncpg import Record
         self.room_key = command.get('room', str(uuid4()))
         query = select([Room]).where(Room.key == self.room_key)
         self.room = await DATABASE.fetch_one(query)
-        if self.room.id not in ROOMS:
-            ROOMS[self.room.id] = RoomSong(self.room.id, self.room_key)
+        if self.room['id'] not in ROOMS:
+            ROOMS[self.room['id']] = RoomSong(self.room['id'], self.room_key)
         self.channel_layer.add(self.room_key, self.channel)
         await self.channel.send({
             'action': 'users',
-            'list': ROOMS[self.room.id].users
+            'list': ROOMS[self.room['id']].users
         })
-        ROOMS[self.room.id].join(self.user['name'])
+        ROOMS[self.room['id']].join(self.user['name'])
         await self.channel_layer.group_send(self.room_key, {
             'action': 'join',
             'user': self.user['name']
@@ -224,11 +225,11 @@ class Server(WebSocketEndpoint):
         await self.channel.send({
             'action': 'room_joined',
             'key': self.room_key,
-            'name': self.room.name,
-            'admin': str(self.user.get('id', 'None')) == self.room.admin,
-            'room_type': str(self.room.room_type.name),
-            'allow_downvote': self.room.allow_downvote,
-            'downvote_threeshold': self.room.downvote_threeshold
+            'name': self.room['name'],
+            'admin': str(self.user.get('id', 'None')) == self.room['admin'],
+            'room_type': str(self.room['room_type'].name),
+            'allow_downvote': self.room['allow_downvote'],
+            'downvote_threeshold': self.room['downvote_threeshold']
         })
         await self.internal_refresh_songs({})
     
@@ -238,31 +239,31 @@ class Server(WebSocketEndpoint):
         })
     
     async def refresh(self, command: dict) -> None:
-        if ROOMS[self.room.id].playing and ROOMS[self.room.id].paused == -1:
+        if ROOMS[self.room['id']].playing and ROOMS[self.room['id']].paused == -1:
             await self.channel.send({
                 'action': 'play',
-                'id': ROOMS[self.room.id].playing.url,
-                'start': int(time()) - ROOMS[self.room.id].time
+                'id': ROOMS[self.room['id']].playing.url,
+                'start': int(time()) - ROOMS[self.room['id']].time
             })
     
     async def internal_refresh_songs(self, command: dict) -> None:
-        songs_query = select([Song]).where(Song.room_id == self.room.id)
-        if self.room.room_type == RoomType.simple:
+        songs_query = select([Song]).where(Song.room_id == self.room['id'])
+        if self.room['room_type'] == RoomType.simple:
             songs_query = songs_query.order_by(Song.order)
-        elif self.room.room_type == RoomType.random:
+        elif self.room['room_type'] == RoomType.random:
             songs_query = songs_query.order_by(func.random())
         else:
             songs_query = songs_query.order_by(Song.upvotes.desc(), Song.order)
         self.songs = await DATABASE.fetch_all(songs_query)
         songs = [{
-            'id': song.id,
-            'title': song.name,
-            'by': song.added_by,
-            'upvotes': song.upvotes,
-            'voted': song.id in USER_VOTES['voted'][self.user['id']],
-            'downed': song.id in USER_VOTES['downed'][self.user['id']],
-            'downvotes': song.downvotes,
-            'url': song.url
+            'id': song['id'],
+            'title': song['name'],
+            'by': song['added_by'],
+            'upvotes': song['upvotes'],
+            'voted': song['id'] in USER_VOTES['voted'][self.user['id']],
+            'downed': song['id'] in USER_VOTES['downed'][self.user['id']],
+            'downvotes': song['downvotes'],
+            'url': song['url']
         } for song in self.songs]
         await self.channel.send({
             'action': 'songs_list',
@@ -270,7 +271,7 @@ class Server(WebSocketEndpoint):
         })
     
     async def update_room(self, command: dict) -> None:
-        if not self.room or self.room.admin != self.user.get('id', 'None'):
+        if not self.room or self.room['admin'] != self.user.get('id', 'None'):
             return
         values = {}
         values['name'] = command.get('name', 'Anonymous room')
@@ -283,20 +284,20 @@ class Server(WebSocketEndpoint):
             values['room_type'] = RoomType.random
         else:
             values['room_type'] = RoomType.fav
-        query = update(Room).where(Room.id == self.room.id).values(**values)
+        query = update(Room).where(Room.id == self.room['id']).values(**values)
         await DATABASE.execute(query)
         await internal_channel_propagate(self.room_key, {'action': 'update_room'})
         await internal_channel_propagate(self.room_key, {'action': 'refresh_songs'})
     
     async def internal_update_room(self, command: dict) -> None:
-        query = select([Room]).where(Room.id == self.room.id)
+        query = select([Room]).where(Room.id == self.room['id'])
         self.room = await DATABASE.fetch_one(query)
         await self.channel.send({
             'action': 'room_updated',
-            'name': self.room.name,
-            'room_type': str(self.room.room_type.name),
-            'allow_downvote': self.room.allow_downvote,
-            'downvote_threeshold': self.room.downvote_threeshold
+            'name': self.room['name'],
+            'room_type': str(self.room['room_type'].name),
+            'allow_downvote': self.room['allow_downvote'],
+            'downvote_threeshold': self.room['downvote_threeshold']
         })
     
     async def search(self, command: dict) -> None:
@@ -326,59 +327,59 @@ class Server(WebSocketEndpoint):
             played=-1,
             upvotes=0,
             downvotes=0,
-            room_id=self.room.id
+            room_id=self.room['id']
         )
         await DATABASE.execute(query)
         await internal_channel_propagate(self.room_key, {'action': 'refresh_songs'})
     
     async def play(self, command: dict) -> None:
-        if not self.room or self.room.admin != self.user.get('id', 'None'):
+        if not self.room or self.room['admin'] != self.user.get('id', 'None'):
             return
-        ROOMS[self.room.id].do_play()
+        ROOMS[self.room['id']].do_play()
     
     async def stop(self, command: dict) -> None:
-        if not self.room or self.room.admin != self.user.get('id', 'None'):
+        if not self.room or self.room['admin'] != self.user.get('id', 'None'):
             return
-        await ROOMS[self.room.id].stop()
+        await ROOMS[self.room['id']].stop()
     
     async def skip(self, command: dict) -> None:
-        if not self.room or self.room.admin != self.user.get('id', 'None'):
+        if not self.room or self.room['admin'] != self.user.get('id', 'None'):
             return
-        ROOMS[self.room.id].next()
+        ROOMS[self.room['id']].next()
 
     async def vote_song(self, command: dict) -> None:
         song_id = command.get('id', -1)
-        song = next(song for song in self.songs if song.id == song_id)
+        song = next(song for song in self.songs if song['id'] == song_id)
         if song:
             if song_id not in USER_VOTES['voted'][self.user['id']]:
-                query = update(Song).where(Song.id == song_id).values(upvotes=song.upvotes + 1)
+                query = update(Song).where(Song.id == song_id).values(upvotes=Song.upvotes + 1)
                 USER_VOTES['voted'][self.user['id']].append(song_id)
             else:
-                query = update(Song).where(Song.id == song_id).values(upvotes=song.upvotes - 1)
+                query = update(Song).where(Song.id == song_id).values(upvotes=Song.upvotes - 1)
                 USER_VOTES['voted'][self.user['id']].remove(song_id)
             await DATABASE.execute(query)
             await internal_channel_propagate(self.room_key, {'action': 'refresh_songs'})
 
     async def downvote_song(self, command: dict) -> None:
         song_id = command.get('id', -1)
-        song = next(song for song in self.songs if song.id == song_id)
+        song = next(song for song in self.songs if song['id'] == song_id)
         if song:
             if song_id not in USER_VOTES['downed'][self.user['id']]:
-                query = update(Song).where(Song.id == song_id).values(downvotes=song.downvotes + 1)
+                query = update(Song).where(Song.id == song_id).values(downvotes=Song.downvotes + 1)
                 USER_VOTES['downed'][self.user['id']].append(song_id)
-                if song.downvotes + 1 >= self.room.downvote_threeshold:
+                if song['downvotes'] + 1 >= self.room['downvote_threeshold']:
                     query = delete(Song).where(Song.id == song_id)
             else:
-                query = update(Song).where(Song.id == song_id).values(downvotes=song.downvotes - 1)
+                query = update(Song).where(Song.id == song_id).values(downvotes=Song.downvotes - 1)
                 USER_VOTES['downed'][self.user['id']].remove(song_id)
             await DATABASE.execute(query)
             await internal_channel_propagate(self.room_key, {'action': 'refresh_songs'})
 
     async def delete_song(self, command: dict) -> None:
-        if not self.room or self.room.admin != self.user.get('id', 'None'):
+        if not self.room or self.room['admin'] != self.user.get('id', 'None'):
             return
         song_id = command.get('id', -1)
-        song = next(song for song in self.songs if song.id == song_id)
+        song = next(song for song in self.songs if song['id'] == song_id)
         if song:
             query = delete(Song).where(Song.id == song_id)
             await DATABASE.execute(query)
