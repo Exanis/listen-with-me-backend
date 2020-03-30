@@ -2,7 +2,7 @@ from typing import List, Tuple
 from uuid import uuid4
 import re
 import asyncio
-from urllib import quote
+from urllib.parse import quote
 from time import time
 from isodate import parse_duration
 from sqlalchemy import select, insert, update, delete, func
