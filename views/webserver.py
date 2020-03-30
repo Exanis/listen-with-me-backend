@@ -109,6 +109,9 @@ class RoomSong():
                         'start': 0 if self.paused == -1 else self.paused
                     })
                     if self.paused != -1:
+                        for user in USER_VOTES['voted']:
+                            if to_play['id'] in USER_VOTES['voted']:
+                                USER_VOTES['voted'][user].remove(to_play['id'])
                         self.time = int(time()) - self.paused
                         duration -= self.paused
                     self.paused = -1
@@ -348,7 +351,7 @@ class Server(WebSocketEndpoint):
         ROOMS[self.room['id']].next()
 
     async def vote_song(self, command: dict) -> None:
-        song_id = command.get('id', -1)
+        song_id = int(command.get('id', -1))
         song = next(song for song in self.songs if song['id'] == song_id)
         if song:
             if song_id not in USER_VOTES['voted'][self.user['id']]:
