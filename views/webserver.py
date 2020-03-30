@@ -242,7 +242,7 @@ class Server(WebSocketEndpoint):
         if ROOMS[self.room['id']].playing and ROOMS[self.room['id']].paused == -1:
             await self.channel.send({
                 'action': 'play',
-                'id': ROOMS[self.room['id']].playing.url,
+                'id': ROOMS[self.room['id']].playing['url'],
                 'start': int(time()) - ROOMS[self.room['id']].time
             })
     
