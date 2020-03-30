@@ -5,6 +5,7 @@ import asyncio
 from urllib.parse import quote
 from time import time
 from isodate import parse_duration
+import requests
 from sqlalchemy import select, insert, update, delete, func
 from googleapiclient.discovery import build
 from nejma.layers import channel_layer
