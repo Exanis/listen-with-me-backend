@@ -5,8 +5,10 @@ from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
+from sqlalchemy import update
 import config
 from views import Server
+from models import Song
 
 
 ROUTES = [
@@ -30,6 +32,8 @@ app.state.config = config
 @app.on_event("startup")
 async def startup():
     await config.DATABASE.connect()
+    query = update(Song).values(upvotes=0, downvotes=0)
+    await config.DATABASE.execute(query)
 
 @app.on_event("shutdown")
 async def shutdown():

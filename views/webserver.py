@@ -1,5 +1,8 @@
+from typing import List, Tuple
 from uuid import uuid4
+import re
 import asyncio
+from urllib import quote
 from time import time
 from isodate import parse_duration
 from sqlalchemy import select, insert, update, delete, func
@@ -8,8 +11,15 @@ from nejma.layers import channel_layer
 from nejma.ext.starlette import WebSocketEndpoint
 from starlette.websockets import WebSocket
 from starlette.types import Receive, Scope, Send
-from config import DATABASE, YOUTUBE_KEY
+from config import DATABASE, YOUTUBE_KEY, REDIS
 from models import Room, Song, RoomType
+
+
+def get_videos_list(query: str) -> List[Tuple]:
+    query = quote(query)
+    content = requests.get(f"https://www.youtube.com/results?search_query={quote}")
+    body = content.text
+    return re.findall('i.ytimg.com/vi/([^/]+)/.+?data-video-ids="([^"]+)".+?title="([^"]+)"', body)
 
 
 YOUTUBE = build('youtube', 'v3', developerKey=YOUTUBE_KEY)
@@ -81,14 +91,21 @@ class RoomSong():
             songs = await DATABASE.fetch_all(songs_query)
             if len(songs):
                 to_play = songs[0] if self.paused == -1 else self.playing
-                data = YOUTUBE.videos().list(
-                    part='contentDetails',
-                    id=to_play['url']
-                )
-                content = data.execute()
-                if content.get('items', []):
-                    duration_iso = content['items'][0].get('contentDetails', {}).get('duration')
-                    duration = parse_duration(duration_iso).total_seconds()
+                cache_data = REDIS.get(to_play['url'])
+                duration = None
+                if cache_data is None:
+                    data = YOUTUBE.videos().list(
+                        part='contentDetails',
+                        id=to_play['url']
+                    )
+                    content = data.execute()
+                    if content.get('items', []):
+                        duration_iso = content['items'][0].get('contentDetails', {}).get('duration')
+                        duration = parse_duration(duration_iso).total_seconds()
+                        REDIS.set(to_play['url'], str(duration))
+                else:
+                    duration = int(duration)
+                if duration:
                     if self.paused == -1:
                         query = update(Song).where(Song.room_id == to_play['room_id']).values(order=Song.order - 1)
                         await DATABASE.execute(query)
@@ -98,7 +115,7 @@ class RoomSong():
                         )
                         await DATABASE.execute(query)
                         for user in USER_VOTES['voted']:
-                            if to_play['id'] in USER_VOTES['voted']:
+                            if to_play['id'] in USER_VOTES['voted'][user]:
                                 USER_VOTES['voted'][user].remove(to_play['id'])
                         await internal_channel_propagate(self.group, {'action': 'refresh_songs'})
                     self.playing = to_play
@@ -305,14 +322,14 @@ class Server(WebSocketEndpoint):
     
     async def search(self, command: dict) -> None:
         keyword = command.get('keyword', '')
-        query = YOUTUBE.search().list(part='snippet', q=keyword, maxResults=50)
+        query = get_videos_list(keyword)
         videos = query.execute()
         results = [
             {
-                'id': video['id']['videoId'],
-                'title': video['snippet']['title'],
-                'thumbnail': video['snippet']['thumbnails']['medium']['url'],
-            } for video in videos['items'] if video['id']['kind'] == 'youtube#video'
+                'id': video[1],
+                'title': video[2],
+                'thumbnail': f'https://i.ytimg.com/vi/{video[0]}/hqdefault.jpg',
+            } for video in videos
         ]
         await self.channel.send({
             'action': 'search_results',

@@ -1,4 +1,5 @@
 import databases
+import redis
 from starlette.config import Config
 from starlette.datastructures import CommaSeparatedStrings, Secret
 
@@ -17,6 +18,7 @@ YOUTUBE_KEY = config('YOUTUBE_KEY', cast=Secret, default='')
 
 # Database tools
 DATABASE = databases.Database(str(DATABASE_URL).replace('postgres://', 'postgresql://'))
+REDIS = redis.Redis(host='redis', port=6379, db=0)
 
 
 # Debug run settings
