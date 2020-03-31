@@ -105,7 +105,7 @@ class RoomSong():
                         duration = parse_duration(duration_iso).total_seconds()
                         REDIS.set(to_play['url'], str(duration))
                 else:
-                    duration = int(duration)
+                    duration = int(cache_data)
                 if duration:
                     if self.paused == -1:
                         query = update(Song).where(Song.room_id == to_play['room_id']).values(order=Song.order - 1)
