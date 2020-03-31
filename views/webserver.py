@@ -18,8 +18,8 @@ from models import Room, Song, RoomType
 
 def get_videos_list(query: str) -> List[Tuple]:
     query = quote(query)
-    content = requests.get(f"https://www.youtube.com/results?search_query={quote}")
-    body = content.text
+    content = requests.get(f"https://www.youtube.com/results?search_query={query}")
+    body = content.text.replace("\n", '')
     return re.findall('i.ytimg.com/vi/([^/]+)/.+?data-video-ids="([^"]+)".+?title="([^"]+)"', body)
 
 
@@ -166,7 +166,7 @@ class Server(WebSocketEndpoint):
         await super().on_disconnect(websocket, close_code)
         if self.room:
             ROOMS[self.room['id']].leave(self.user['name'])
-            self.channel_layer.group_send(self.room_key, {
+            await self.channel_layer.group_send(self.room_key, {
                 'action': 'leave',
                 'user': self.user['name']
             })
@@ -323,8 +323,7 @@ class Server(WebSocketEndpoint):
     
     async def search(self, command: dict) -> None:
         keyword = command.get('keyword', '')
-        query = get_videos_list(keyword)
-        videos = query.execute()
+        videos = get_videos_list(keyword)
         results = [
             {
                 'id': video[1],
