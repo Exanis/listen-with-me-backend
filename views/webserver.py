@@ -83,10 +83,8 @@ class RoomSong():
             query = select([Room]).where(Room.id == self.room_id)
             room = await DATABASE.fetch_one(query)
             songs_query = select([Song]).where(Song.room_id == self.room_id)
-            if room['room_type'] == RoomType.simple:
+            if room['room_type'] == RoomType.simple or room['room_type'] == RoomType.random:
                 songs_query = songs_query.order_by(Song.order)
-            elif room['room_type'] == RoomType.random:
-                songs_query = songs_query.order_by(func.random())
             else:
                 songs_query = songs_query.order_by(Song.upvotes.desc(), Song.order)
             songs = await DATABASE.fetch_all(songs_query)
@@ -217,7 +215,9 @@ class Server(WebSocketEndpoint):
             admin=self.user.get('id', 'Error'),
             room_type=RoomType.simple,
             allow_downvote=True,
-            downvote_threeshold=3
+            downvote_threeshold=3,
+            limit_per_user=False,
+            max_per_user=10
         )
         await DATABASE.execute(query)
         self.channel_layer.add(room_key, self.channel)
@@ -227,7 +227,6 @@ class Server(WebSocketEndpoint):
         })
 
     async def join_room(self, command: dict) -> None:
-        from asyncpg import Record
         self.room_key = command.get('room', str(uuid4()))
         query = select([Room]).where(Room.key == self.room_key)
         self.room = await DATABASE.fetch_one(query)
@@ -250,7 +249,9 @@ class Server(WebSocketEndpoint):
             'admin': str(self.user.get('id', 'None')) == self.room['admin'],
             'room_type': str(self.room['room_type'].name),
             'allow_downvote': self.room['allow_downvote'],
-            'downvote_threeshold': self.room['downvote_threeshold']
+            'downvote_threeshold': self.room['downvote_threeshold'],
+            'limit_per_user': self.room['limit_per_user'],
+            'max_per_user': self.room['max_per_user']
         })
         await self.internal_refresh_songs({})
     
@@ -272,7 +273,7 @@ class Server(WebSocketEndpoint):
         if self.room['room_type'] == RoomType.simple:
             songs_query = songs_query.order_by(Song.order)
         elif self.room['room_type'] == RoomType.random:
-            songs_query = songs_query.order_by(func.random())
+            songs_query = songs_query.order_by(Song.name)
         else:
             songs_query = songs_query.order_by(Song.upvotes.desc(), Song.order)
         self.songs = await DATABASE.fetch_all(songs_query)
@@ -286,9 +287,11 @@ class Server(WebSocketEndpoint):
             'downvotes': song['downvotes'],
             'url': song['url']
         } for song in self.songs]
+        songs_by_me = len([song for song in self.songs if song['added_id'] == self.user['id']])
         await self.channel.send({
             'action': 'songs_list',
-            'songs': songs
+            'songs': songs,
+            'can_add': not(self.room['limit_per_user'] and songs_by_me >= self.room['max_per_user'])
         })
     
     async def update_room(self, command: dict) -> None:
@@ -298,11 +301,20 @@ class Server(WebSocketEndpoint):
         values['name'] = command.get('name', 'Anonymous room')
         values['allow_downvote'] = command.get('allow_downvote', True)
         values['downvote_threeshold'] = int(command.get('downvote_threeshold', 3))
+        values['limit_per_user'] = command.get('limit_per_user', False)
+        values['max_per_user'] = int(command.get('max_per_user', 10))
         room_type = command.get('room_type', 'simple')
         if room_type == 'simple':
             values['room_type'] = RoomType.simple
         elif room_type == 'random':
             values['room_type'] = RoomType.random
+            songs_query = select([Song]).where(Song.room_id == self.room['id']).order_by(func.random())
+            songs = await DATABASE.fetch_all(songs_query)
+            i = 0
+            for song in songs:
+                query = update(Song).where(Song.id == song['id']).values(order=i)
+                i += 1
+                await DATABASE.execute(query)
         else:
             values['room_type'] = RoomType.fav
         query = update(Room).where(Room.id == self.room['id']).values(**values)
@@ -318,7 +330,9 @@ class Server(WebSocketEndpoint):
             'name': self.room['name'],
             'room_type': str(self.room['room_type'].name),
             'allow_downvote': self.room['allow_downvote'],
-            'downvote_threeshold': self.room['downvote_threeshold']
+            'downvote_threeshold': self.room['downvote_threeshold'],
+            'limit_per_user': self.room['limit_per_user'],
+            'max_per_user': self.room['max_per_user']
         })
     
     async def search(self, command: dict) -> None:
@@ -337,6 +351,9 @@ class Server(WebSocketEndpoint):
         })
 
     async def add_song(self, command: dict) -> None:
+        songs_by_me = len([song for song in self.songs if song['added_id'] == self.user['id']])
+        if self.room['limit_per_user'] and songs_by_me >= self.room['max_per_user']:
+            return
         key = command.get('key', '')
         title = command.get('title', '')
         query = insert(Song).values(
@@ -347,7 +364,8 @@ class Server(WebSocketEndpoint):
             played=-1,
             upvotes=0,
             downvotes=0,
-            room_id=self.room['id']
+            room_id=self.room['id'],
+            added_id=self.user['id']
         )
         await DATABASE.execute(query)
         await internal_channel_propagate(self.room_key, {'action': 'refresh_songs'})

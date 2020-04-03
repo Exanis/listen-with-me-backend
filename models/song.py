@@ -10,6 +10,7 @@ class Song(Base):
     url = Column(String(2048))
     name = Column(String(255))
     added_by = Column(String(255), default='')
+    added_id = Column(String(255), default='')
     order = Column(Integer())
     played = Column(Integer(), default=-1)
     upvotes = Column(Integer(), default=0)

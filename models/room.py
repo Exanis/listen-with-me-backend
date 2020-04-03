@@ -22,3 +22,5 @@ class Room(Base):
     downvote_threeshold = Column(Integer(), default=3)
     admin = Column(String(36))
     songs = relationship('Song', back_populates='songs')
+    limit_per_user = Column(Boolean(), default=False)
+    max_per_user = Column(Integer(), default=10)
